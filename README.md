@@ -2,6 +2,14 @@
 
 NanoCSV is a fater C++11 multithreaded header-only CSV parser.
 
+![tty](img/tty.gif)
+
+
+## Status
+
+In development.
+Currently CSV without no header(e.g. Tensor data saved by `numpy.savetxt`) are supported.
+
 ## Compiler options
 
 * NANOCSV_NO_IO : Disable I/O(file access, stdio, mmap).
@@ -10,11 +18,13 @@ NanoCSV is a fater C++11 multithreaded header-only CSV parser.
 
 * [ ] Reduce memory usage. Currently nanocsv allocates some memory for intermediate buffer.
 * [ ] Robust error handling.
-* [ ] Robust header detection.
+* [ ] Support header.
 * [ ] Support different number of fields among records;
 * [ ] Parse complex value(e.g. `3.0 + 4.2j`)
 * [ ] Parse some special values, for example `#INF`, `#NAN`.
 * [ ] CSV writer.
+* [ ] Write tests.
+* [ ] Remove libm(`pow`) dependency.
 
 ## Performance
 
