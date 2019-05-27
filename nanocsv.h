@@ -238,11 +238,11 @@ class StackContainer {
 //   foo[0] = 10;         // as well as operator[]
 template <typename T, size_t stack_capacity>
 class StackVector
-    : public StackContainer<std::vector<T, StackAllocator<T, stack_capacity> >,
+    : public StackContainer<std::vector<T, StackAllocator<T, stack_capacity>>,
                             stack_capacity> {
  public:
   StackVector()
-      : StackContainer<std::vector<T, StackAllocator<T, stack_capacity> >,
+      : StackContainer<std::vector<T, StackAllocator<T, stack_capacity>>,
                        stack_capacity>() {}
 
   // We need to put this in STL containers sometimes, which requires a copy
@@ -250,7 +250,7 @@ class StackVector
   // take the stack buffer from the original. Here, we create an empty object
   // and make a stack buffer of its own.
   StackVector(const StackVector<T, stack_capacity> &other)
-      : StackContainer<std::vector<T, StackAllocator<T, stack_capacity> >,
+      : StackContainer<std::vector<T, StackAllocator<T, stack_capacity>>,
                        stack_capacity>() {
     this->container().assign(other->begin(), other->end());
   }
@@ -346,7 +346,7 @@ static bool tryParseDouble(const char *s, const char *s_end, double *result) {
   // exponent to be in base 2.
   int exponent = 0;
 
-  uint32_t abs_exponent = 0; // = abs(exponent)
+  uint32_t abs_exponent = 0;  // = abs(exponent)
 
   // NOTE: THESE MUST BE DECLARED HERE SINCE WE ARE NOT ALLOWED
   // TO JUMP OVER DEFINITIONS.
@@ -408,12 +408,12 @@ static bool tryParseDouble(const char *s, const char *s_end, double *result) {
     read = 1;
     end_not_reached = (curr != s_end);
     while (end_not_reached && IS_DIGIT(*curr)) {
-
       static const double pow_lut[] = {
-          1.0, 1.0e-1, 1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7,
-          1.0e-8, 1.0e-9, 1.0e-10, 1.0e-11, 1.0e-12, 1.0e-13, 1.0e-14, 1.0e-15,
-          1.0e-16, 1.0e-17, 1.0e-18, 1.0e-19, 1.0e-20, 1.0e-21, 1.0e-22, 1.0e-23,
-          1.0e-24, 1.0e-25, 1.0e-26, 1.0e-27, 1.0e-28, 1.0e-29, 1.0e-30, 1.0e-31,
+          1.0,     1.0e-1,  1.0e-2,  1.0e-3,  1.0e-4,  1.0e-5,  1.0e-6,
+          1.0e-7,  1.0e-8,  1.0e-9,  1.0e-10, 1.0e-11, 1.0e-12, 1.0e-13,
+          1.0e-14, 1.0e-15, 1.0e-16, 1.0e-17, 1.0e-18, 1.0e-19, 1.0e-20,
+          1.0e-21, 1.0e-22, 1.0e-23, 1.0e-24, 1.0e-25, 1.0e-26, 1.0e-27,
+          1.0e-28, 1.0e-29, 1.0e-30, 1.0e-31,
       };
       const int lut_entries = sizeof pow_lut / sizeof pow_lut[0];
 
@@ -554,7 +554,6 @@ namespace nanocsv {
 template <typename T>
 bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
                const char delimiter) {
-
   if ((p == nullptr) || (p_len < 1)) {
     return false;
   }
@@ -796,7 +795,7 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 
   // 3. parse each line in parallel.
   {
-    StackVector<std::thread, 16> workers;
+    StackVector<std::thread, kMaxThreads> workers;
     auto t_start = std::chrono::high_resolution_clock::now();
 
     bool invalid_csv = false;
@@ -806,12 +805,11 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
         for (size_t i = 0; i < line_infos[t].size(); i++) {
           StackVector<float, 512> values;
           // TODO(LTE): Allow empty line before the header
-          //bool is_header = (t == 0) && (i == 0);
+          // bool is_header = (t == 0) && (i == 0);
           // TODO(LTE): parse header string
           bool ret = ParseLine(&buffer[line_infos[t][i].pos],
                                line_infos[t][i].len, &values, option.delimiter);
           if (ret) {
-
             if (num_fields_per_thread[t] == -1) {
               num_fields_per_thread[t] = int(values->size());
             }
@@ -826,8 +824,6 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
               line_buffer[t].push_back(values[k]);
             }
           }
-
-
         }
       }));
     }
@@ -864,7 +860,8 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
       if (num_fields_per_thread[i] != num_fields) {
         if (err) {
           std::stringstream ss;
-          ss << "Thread " << i << " has num_fields " << num_fields_per_thread[i] << " but it should be " << num_fields << " (thread 0)\n";
+          ss << "Thread " << i << " has num_fields " << num_fields_per_thread[i]
+             << " but it should be " << num_fields << " (thread 0)\n";
           (*err) += ss.str();
         }
         return false;
@@ -878,18 +875,38 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 
     csv->num_fields = size_t(num_fields);
 
-    // TODO(LTE): Optimize concatenation. use emplace_back + std::move to remove temporary memory, or use memcpy?
+    // Offset index to output csv.values.
+    StackVector<size_t, kMaxThreads> offset_table;
+    offset_table->resize(size_t(num_threads));
 
-    // Actual # of elements may be less than `num_records * num_fields`
-    csv->values.clear();
-
+    // Compute offset index and count actual numer of records.
+    size_t num_actual_records = 0;
+    size_t offset = 0;
     for (size_t t = 0; t < size_t(num_threads); t++) {
-      for (size_t i = 0; i < line_buffer[t].size(); i++) {
-        csv->values.push_back(line_buffer[t][i]);
-      }
+      offset_table[t] = offset;
+
+      // Assume all record has same number of fields,
+      // so dividing the number of fields gives the number of records.j
+      offset += line_buffer[t].size();  // = num_fields * num_records per thread
+      num_actual_records += line_buffer[t].size() / size_t(num_fields);
     }
 
-    csv->num_records = csv->values.size() / csv->num_fields;
+    csv->num_records = num_actual_records;
+
+    csv->values.resize(csv->num_fields * csv->num_records);
+
+    StackVector<std::thread, kMaxThreads> workers;
+
+    for (size_t t = 0; t < size_t(num_threads); t++) {
+      workers->push_back(std::thread([&, t]() {
+        memcpy(csv->values.data() + offset_table[t], line_buffer[t].data(),
+               sizeof(T) * line_buffer[t].size());
+      }));
+    }
+
+    for (size_t t = 0; t < workers->size(); t++) {
+      workers[t].join();
+    }
 
     auto t_end = std::chrono::high_resolution_clock::now();
 

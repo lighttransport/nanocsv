@@ -4,10 +4,11 @@
 int main(int argc, char **argv)
 {
   if (argc < 2) {
-    std::cout << "csv_parser_example input.csv (delimiter)\n";
+    std::cout << "csv_parser_example input.csv (num_threads) (delimiter)\n";
   }
 
   std::string filename("./data/array-4-5.csv");
+  int num_threads = -1; // -1 = use all system threads
   char delimiter = ' ';
 
   if (argc > 1) {
@@ -15,11 +16,16 @@ int main(int argc, char **argv)
   }
 
   if (argc > 2) {
-    delimiter = argv[2][0];
+    num_threads = std::atoi(argv[2]);
+  }
+
+  if (argc > 3) {
+    delimiter = argv[3][0];
   }
 
   nanocsv::ParseOption option;
   option.delimiter = delimiter;
+  option.req_num_threads = num_threads;
   option.verbose = true;
 
   std::string warn;
