@@ -10,12 +10,81 @@ NanoCSV is a fater C++11 multithreaded header-only CSV parser.
 In development.
 Currently CSV without no header(e.g. Tensor data saved by `numpy.savetxt`) are supported.
 
+## Requirements
+
+* C++11 compiler(with `thread` support)
+
+## Usage
+
+```c++
+
+// defined this only in **one** c++ file.
+#define NANOCSV_IMPLEMENTATION
+#include "nanocsv.h"
+
+int main(int argc, char **argv)
+{
+  if (argc < 2) {
+    std::cout << "csv_parser_example input.csv (num_threads) (delimiter)\n";
+  }
+
+  std::string filename("./data/array-4-5.csv");
+  int num_threads = -1; // -1 = use all system threads
+  char delimiter = ' '; // delimiter character.
+
+  if (argc > 1) {
+    filename = argv[1];
+  }
+
+  if (argc > 2) {
+    num_threads = std::atoi(argv[2]);
+  }
+
+  if (argc > 3) {
+    delimiter = argv[3][0];
+  }
+
+  nanocsv::ParseOption option;
+  option.delimiter = delimiter;
+  option.req_num_threads = num_threads;
+  option.verbose = true; // verbse message will be stored in `warn`.
+
+  std::string warn;
+  std::string err;
+
+  nanocsv::CSV<float> csv;
+
+  bool ret = nanocsv::ParseCSVFromFile(filename, option, &csv, &warn, &err);
+
+  if (!warn.empty()) {
+    std::cout << "WARN: " << warn << "\n";
+  }
+
+
+  if (!ret) {
+
+    if (!err.empty()) {
+      std::cout << "ERROR: " << err << "\n";
+    }
+
+    return EXIT_FAILURE;
+  }
+
+  std::cout << "num records(rows) = " << csv.num_records << "\n";
+  std::cout << "num fields(columns) = " << csv.num_fields << "\n";
+
+  return EXIT_SUCCESS;
+}
+```
+
 ## Compiler options
 
 * NANOCSV_NO_IO : Disable I/O(file access, stdio, mmap).
 
+
 ## TODO
 
+* [ ] mmap based API
 * [ ] Reduce memory usage. Currently nanocsv allocates some memory for intermediate buffer.
 * [ ] Robust error handling.
 * [ ] Support header.
