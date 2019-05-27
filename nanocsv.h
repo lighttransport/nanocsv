@@ -283,52 +283,10 @@ class CSV {
   size_t num_records;
 };
 
-typedef StackVector<char, 256> ShortString;
-
-#define IS_SPACE(x) (((x) == ' ') || ((x) == '\t'))
 #define IS_DIGIT(x) \
   (static_cast<unsigned int>((x) - '0') < static_cast<unsigned int>(10))
 
-#define IS_NEW_LINE(x, newline_delimiter) \
-  (((x) == newline_delimiter) || ((x) == '\0'))
-
-static inline void skip_space(const char **token) {
-  while ((*token)[0] == ' ' || (*token)[0] == '\t') {
-    (*token)++;
-  }
-}
-
-static inline void skip_space_and_cr(const char **token) {
-  while ((*token)[0] == ' ' || (*token)[0] == '\t' || (*token)[0] == '\r') {
-    (*token)++;
-  }
-}
-
-static inline size_t until_space(const char *token) {
-  const char *p = token;
-  while (p[0] != '\0' && p[0] != ' ' && p[0] != '\t' && p[0] != '\r') {
-    p++;
-  }
-
-  return size_t(p - token);
-}
-
-static inline int length_until_newline(const char *token, int n) {
-  int len = 0;
-
-  // Assume token[n-1] = '\0'
-  for (len = 0; len < n - 1; len++) {
-    if (token[len] == '\n') {
-      break;
-    }
-    if ((token[len] == '\r') && ((len < (n - 2)) && (token[len + 1] != '\n'))) {
-      break;
-    }
-  }
-
-  return len;
-}
-
+#if 0
 // http://stackoverflow.com/questions/5710091/how-does-atoi-function-in-c-work
 static inline int my_atoi(const char *c) {
   int value = 0;
@@ -344,21 +302,7 @@ static inline int my_atoi(const char *c) {
   }
   return value * sign;
 }
-
-static inline bool parseString(ShortString *s, const char **token) {
-  skip_space(token);
-  size_t e = until_space((*token));
-  (*s)->insert((*s)->end(), (*token), (*token) + e);
-  (*token) += e;
-  return true;
-}
-
-static inline int parseInt(const char **token) {
-  skip_space(token);
-  int i = my_atoi((*token));
-  (*token) += until_space((*token));
-  return i;
-}
+#endif
 
 // Tries to parse a floating point number located at s.
 //
@@ -401,6 +345,8 @@ static bool tryParseDouble(const char *s, const char *s_end, double *result) {
   // To get the final double we will use ldexp, it requires the
   // exponent to be in base 2.
   int exponent = 0;
+
+  uint32_t abs_exponent = 0; // = abs(exponent)
 
   // NOTE: THESE MUST BE DECLARED HERE SINCE WE ARE NOT ALLOWED
   // TO JUMP OVER DEFINITIONS.
@@ -462,12 +408,19 @@ static bool tryParseDouble(const char *s, const char *s_end, double *result) {
     read = 1;
     end_not_reached = (curr != s_end);
     while (end_not_reached && IS_DIGIT(*curr)) {
-      // pow(10.0, -read)
-      double frac_value = 1.0;
-      for (int f = 0; f < read; f++) {
-        frac_value *= 0.1;
-      }
-      mantissa += static_cast<int>(*curr - 0x30) * frac_value;
+
+      static const double pow_lut[] = {
+          1.0, 1.0e-1, 1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7,
+          1.0e-8, 1.0e-9, 1.0e-10, 1.0e-11, 1.0e-12, 1.0e-13, 1.0e-14, 1.0e-15,
+          1.0e-16, 1.0e-17, 1.0e-18, 1.0e-19, 1.0e-20, 1.0e-21, 1.0e-22, 1.0e-23,
+          1.0e-24, 1.0e-25, 1.0e-26, 1.0e-27, 1.0e-28, 1.0e-29, 1.0e-30, 1.0e-31,
+      };
+      const int lut_entries = sizeof pow_lut / sizeof pow_lut[0];
+
+      // NOTE: Don't use powf here, it will absolutely murder precision.
+      mantissa += static_cast<int>(*curr - 0x30) *
+                  (read < lut_entries ? pow_lut[read] : std::pow(10.0, -read));
+
       read++;
       curr++;
       end_not_reached = (curr != s_end);
@@ -502,6 +455,8 @@ static bool tryParseDouble(const char *s, const char *s_end, double *result) {
       read++;
       end_not_reached = (curr != s_end);
     }
+
+    abs_exponent = static_cast<uint32_t>(exponent);
     exponent *= (exp_sign == '+' ? 1 : -1);
     if (read == 0) goto fail;
   }
@@ -511,12 +466,13 @@ assemble :
 {
   double a = 1.0; /* = pow(5.0, exponent); */
   double b = 1.0; /* = 2.0^exponent */
-  int i;
-  for (i = 0; i < exponent; i++) {
+  uint32_t i;
+
+  for (i = 0; i < abs_exponent; i++) {
     a = a * 5.0;
   }
 
-  for (i = 0; i < exponent; i++) {
+  for (i = 0; i < abs_exponent; i++) {
     b = b * 2.0;
   }
 
@@ -526,7 +482,7 @@ assemble :
   }
 
   // (sign == '+' ? 1 : -1) * ldexp(mantissa * pow(5.0, exponent), exponent);
-  *result = (sign == '+' ? 1 : -1) * (mantissa * a * b);
+  *result = (sign == '+' ? 1 : -1) * (exponent ? (mantissa * a * b) : mantissa);
 }
 
   return true;
@@ -534,41 +490,22 @@ fail:
   return false;
 }
 
-static inline float parseFloat(const char **token) {
-  skip_space(token);
-#ifdef TINY_OBJ_LOADER_OLD_FLOAT_PARSER
-  float f = static_cast<float>(atof(*token));
-  (*token) += strcspn((*token), " \t\r");
-#else
-  const char *end = (*token) + until_space((*token));
-  double val = 0.0;
-  tryParseDouble((*token), end, &val);
-  float f = static_cast<float>(val);
-  (*token) = end;
-#endif
-  return f;
-}
-
-static inline double parseDouble(const char **token) {
-  skip_space(token);
-  const char *end = (*token) + until_space((*token));
-  double val = 0.0;
-  tryParseDouble((*token), end, &val);
-  (*token) = end;
-  return val;
-}
-
 class ParseOption {
  public:
-  ParseOption() : req_num_threads(-1), ignore_header(false), verbose(false) {}
+  ParseOption()
+      : req_num_threads(-1),
+        ignore_header(false),
+        verbose(false),
+        delimiter(' ') {}
 
   int req_num_threads;
   bool ignore_header;
   bool verbose;
+  char delimiter;
 };
 
-/// Parse wavefront .obj(.obj string data is expanded to linear char array
-/// `buf')
+///
+/// Parse CSV data from memory(byte array).
 ///
 /// @param[in] buffer Input buffer(raw CSV text)
 /// @param[in] buffer_length Byte length of input buffer.
@@ -578,11 +515,29 @@ class ParseOption {
 /// `option.verbose` is set to true.
 /// @param[out] err Error message(filled when return value is false)
 /// @return true upon success. false when error happens during parsing.
-//
+///
 template <typename T>
 bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
                         const ParseOption &option, CSV<T> *csv,
                         std::string *warn, std::string *err);
+
+#if !defined(NANOCSV_NO_IO)
+
+///
+/// Parse CSV data from a file.
+///
+/// @param[in] filename CSV filename.
+/// @param[in] option Parse option.
+/// @param[out] csv Parsed CSV data.
+/// @param[out] warn Warning message. Verbose message will be set when
+/// `option.verbose` is set to true.
+/// @param[out] err Error message(filled when return value is false)
+/// @return true upon success. false when error happens during parsing.
+///
+template <typename T>
+bool ParseCSVFromFile(const std::string &filename, const ParseOption &option,
+                      CSV<T> *csv, std::string *warn, std::string *err);
+#endif
 
 }  // namespace nanocsv
 
@@ -592,384 +547,79 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 
 namespace nanocsv {
 
-///
-/// Simple stream reader
-///
-class StreamReader {
-  static inline void swap2(unsigned short *val) {
-    unsigned short tmp = *val;
-    uint8_t *dst = reinterpret_cast<uint8_t *>(val);
-    uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
+//
+// Parse single line and store results to `values`.
+// Assume input line is not a header line
+//
+template <typename T>
+bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
+               const char delimiter) {
 
-    dst[0] = src[1];
-    dst[1] = src[0];
+  if ((p == nullptr) || (p_len < 1)) {
+    return false;
   }
 
-  static inline void swap4(uint32_t *val) {
-    uint32_t tmp = *val;
-    uint8_t *dst = reinterpret_cast<uint8_t *>(val);
-    uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
-
-    dst[0] = src[3];
-    dst[1] = src[2];
-    dst[2] = src[1];
-    dst[3] = src[0];
-  }
-
-  static inline void swap4(int *val) {
-    int tmp = *val;
-    uint8_t *dst = reinterpret_cast<uint8_t *>(val);
-    uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
-
-    dst[0] = src[3];
-    dst[1] = src[2];
-    dst[2] = src[1];
-    dst[3] = src[0];
-  }
-
-  static inline void swap8(uint64_t *val) {
-    uint64_t tmp = (*val);
-    uint8_t *dst = reinterpret_cast<uint8_t *>(val);
-    uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
-
-    dst[0] = src[7];
-    dst[1] = src[6];
-    dst[2] = src[5];
-    dst[3] = src[4];
-    dst[4] = src[3];
-    dst[5] = src[2];
-    dst[6] = src[1];
-    dst[7] = src[0];
-  }
-
-  static inline void swap8(int64_t *val) {
-    int64_t tmp = (*val);
-    uint8_t *dst = reinterpret_cast<uint8_t *>(val);
-    uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
-
-    dst[0] = src[7];
-    dst[1] = src[6];
-    dst[2] = src[5];
-    dst[3] = src[4];
-    dst[4] = src[3];
-    dst[5] = src[2];
-    dst[6] = src[1];
-    dst[7] = src[0];
-  }
-
-  static void cpy4(int *dst_val, const int *src_val) {
-    unsigned char *dst = reinterpret_cast<unsigned char *>(dst_val);
-    const unsigned char *src = reinterpret_cast<const unsigned char *>(src_val);
-
-    dst[0] = src[0];
-    dst[1] = src[1];
-    dst[2] = src[2];
-    dst[3] = src[3];
-  }
-
-  static void cpy4(uint32_t *dst_val, const uint32_t *src_val) {
-    unsigned char *dst = reinterpret_cast<unsigned char *>(dst_val);
-    const unsigned char *src = reinterpret_cast<const unsigned char *>(src_val);
-
-    dst[0] = src[0];
-    dst[1] = src[1];
-    dst[2] = src[2];
-    dst[3] = src[3];
-  }
-
- public:
-  explicit StreamReader(const uint8_t *binary, const size_t length,
-                        const bool swap_endian)
-      : binary_(binary), length_(length), swap_endian_(swap_endian), idx_(0) {
-    (void)pad_;
-  }
-
-  bool seek_set(const uint64_t offset) {
-    if (offset > length_) {
-      return false;
-    }
-
-    idx_ = offset;
-    return true;
-  }
-
-  bool seek_from_currect(const int64_t offset) {
-    if ((int64_t(idx_) + offset) < 0) {
-      return false;
-    }
-
-    if (size_t((int64_t(idx_) + offset)) > length_) {
-      return false;
-    }
-
-    idx_ = size_t(int64_t(idx_) + offset);
-    return true;
-  }
-
-  size_t read(const size_t n, const uint64_t dst_len, uint8_t *dst) {
-    size_t len = n;
-    if ((idx_ + len) > length_) {
-      len = length_ - idx_;
-    }
-
-    if (len > 0) {
-      if (dst_len < len) {
-        // dst does not have enough space. return 0 for a while.
-        return 0;
+  size_t loc = 0;
+  if (delimiter != ' ') {
+    // skip leading space.
+    for (size_t i = loc; i < p_len; i++, loc++) {
+      bool isspace = (p[i] == ' ') || (p[i] == '\t');
+      if (!isspace) {
+        break;
       }
-
-      memcpy(dst, &binary_[idx_], len);
-      idx_ += len;
-      return len;
-
-    } else {
-      return 0;
     }
   }
 
-  bool read1(uint8_t *ret) {
-    if ((idx_ + 1) > length_) {
-      return false;
-    }
-
-    const uint8_t val = binary_[idx_];
-
-    (*ret) = val;
-    idx_ += 1;
-
-    return true;
+  if (p[0] == '#') {  // comment line
+    return false;
   }
 
-  bool read_bool(bool *ret) {
-    if ((idx_ + 1) > length_) {
+  (*values)->clear();
+
+  while (loc < p_len) {
+    if (p[loc] == '\0') {
+      // ???
       return false;
     }
 
-    const char val = static_cast<const char>(binary_[idx_]);
-
-    (*ret) = bool(val);
-    idx_ += 1;
-
-    return true;
-  }
-
-  bool read1(char *ret) {
-    if ((idx_ + 1) > length_) {
-      return false;
-    }
-
-    const char val = static_cast<const char>(binary_[idx_]);
-
-    (*ret) = val;
-    idx_ += 1;
-
-    return true;
-  }
-
-#if 0
-  bool read2(unsigned short *ret) {
-    if ((idx_ + 2) > length_) {
-      return false;
-    }
-
-    unsigned short val =
-        *(reinterpret_cast<const unsigned short *>(&binary_[idx_]));
-
-    if (swap_endian_) {
-      swap2(&val);
-    }
-
-    (*ret) = val;
-    idx_ += 2;
-
-    return true;
-  }
-#endif
-
-  bool read4(uint32_t *ret) {
-    if ((idx_ + 4) > length_) {
-      return false;
-    }
-
-    // use cpy4 considering unaligned access.
-    const uint32_t *ptr = reinterpret_cast<const uint32_t *>(&binary_[idx_]);
-    uint32_t val;
-    cpy4(&val, ptr);
-
-    if (swap_endian_) {
-      swap4(&val);
-    }
-
-    (*ret) = val;
-    idx_ += 4;
-
-    return true;
-  }
-
-  bool read4(int *ret) {
-    if ((idx_ + 4) > length_) {
-      return false;
-    }
-
-    // use cpy4 considering unaligned access.
-    const int32_t *ptr = reinterpret_cast<const int32_t *>(&binary_[idx_]);
-    int32_t val;
-    cpy4(&val, ptr);
-
-    if (swap_endian_) {
-      swap4(&val);
-    }
-
-    (*ret) = val;
-    idx_ += 4;
-
-    return true;
-  }
-
-  bool read8(uint64_t *ret) {
-    if ((idx_ + 8) > length_) {
-      return false;
-    }
-
-    uint64_t val = *(reinterpret_cast<const uint64_t *>(&binary_[idx_]));
-
-    if (swap_endian_) {
-      swap8(&val);
-    }
-
-    (*ret) = val;
-    idx_ += 8;
-
-    return true;
-  }
-
-  bool read8(int64_t *ret) {
-    if ((idx_ + 8) > length_) {
-      return false;
-    }
-
-    int64_t val = *(reinterpret_cast<const int64_t *>(&binary_[idx_]));
-
-    if (swap_endian_) {
-      swap8(&val);
-    }
-
-    (*ret) = val;
-    idx_ += 8;
-
-    return true;
-  }
-
-  bool read_float(float *ret) {
-    if (!ret) {
-      return false;
-    }
-
-    float value;
-    if (!read4(reinterpret_cast<int *>(&value))) {
-      return false;
-    }
-
-    (*ret) = value;
-
-    return true;
-  }
-
-  bool read_double(double *ret) {
-    if (!ret) {
-      return false;
-    }
-
-    double value;
-    if (!read8(reinterpret_cast<uint64_t *>(&value))) {
-      return false;
-    }
-
-    (*ret) = value;
-
-    return true;
-  }
-
-  bool read_string(std::string *ret) {
-    if (!ret) {
-      return false;
-    }
-
-    std::string value;
-
-    // read untile '\0' or end of stream.
-    for (;;) {
-      char c;
-      if (!read1(&c)) {
-        return false;
-      }
-
-      value.push_back(c);
-
-      if (c == '\0') {
+    // find delimiter
+    size_t delimiter_loc = loc;
+    for (size_t i = loc; i < p_len; i++, delimiter_loc++) {
+      if ((p[i] == delimiter) || (p[i] == '\0')) {
         break;
       }
     }
 
-    (*ret) = value;
+    if (loc == delimiter_loc) {
+      // something like ",,2.3,,,"
+      loc++;
+      continue;
+    }
 
+    double value;
+    if (tryParseDouble(p + loc, p + delimiter_loc, &value)) {
+      (*values)->push_back(static_cast<T>(value));
+    } else {
+      // TODO(LTE): Report error.
+    }
+
+    // move to the next of delimiter character.
+    loc = delimiter_loc + 1;
+
+    if (delimiter != ' ') {
+      // skip leading space.
+      for (size_t i = loc; i < p_len; i++, loc++) {
+        bool isspace = (p[i] == ' ') || (p[i] == '\t');
+        if (!isspace) {
+          break;
+        }
+      }
+    }
+  }
+
+  if ((*values)->size() > 0) {
     return true;
   }
-
-  void skip_space() {
-    char c;
-    while (!read1(&c)) {
-      if ((c == ' ') || (c == '\t')) {
-        continue;
-      }
-      break;
-    }
-  }
-
-  size_t tell() const { return idx_; }
-
-  const uint8_t *data() const { return binary_; }
-
-  bool swap_endian() const { return swap_endian_; }
-
-  size_t size() const { return length_; }
-
-  signed char front() {
-    // TODO(LTE): Raise error when (idx_ >= length_).
-    return *reinterpret_cast<const signed char *>(binary_ + idx_);
-  }
-
-  bool eof() const { return idx_ >= length_; }
-
- private:
-  const uint8_t *binary_;
-  const size_t length_;
-  bool swap_endian_;
-  char pad_[7];
-  uint64_t idx_;  // current position index.
-};
-
-template <typename T>
-bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
-               bool is_header = false) {
-  StreamReader reader(reinterpret_cast<const uint8_t *>(p), p_len,
-                      /* endian */ false);
-
-  // Skip leading space.
-  reader.skip_space();
-
-  if (reader.eof()) {
-    // empty line
-    return false;
-  }
-
-  if (!is_header) {
-    if (reader.front() == '#') {  // comment line
-      return false;
-    }
-  }
-
-  values->clear();
 
   return false;
 }
@@ -983,7 +633,7 @@ typedef struct {
 // 1. mmap file
 // 2. find newline(\n, \r\n, \r) and list of line data.
 // 3. Do parallel parsing for each line.
-// 4. Reconstruct final mesh data structure.
+// 4. Reconstruct final CSV data structure.
 
 // Raise # of max threads if you have more CPU cores...
 // In 2019, 64 cores(128 threads) are upper bounds in high-end workstaion PC.
@@ -1043,7 +693,6 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
   std::chrono::duration<double, std::milli> ms_linedetection;
   std::chrono::duration<double, std::milli> ms_alloc;
   std::chrono::duration<double, std::milli> ms_parse;
-  std::chrono::duration<double, std::milli> ms_merge;
   std::chrono::duration<double, std::milli> ms_construct;
 
   // 1. Find '\n' and create line data.
@@ -1090,7 +739,7 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 
         // If at least one line started in this chunk, find where it ends in the
         // rest of the buffer
-        if (new_line_found && (t < num_threads) &&
+        if (new_line_found && (t < size_t(num_threads)) &&
             (buffer[end_idx - 1] != '\n')) {
           for (size_t i = end_idx; i < buffer_length; i++) {
             if (is_line_ending(buffer, i, buffer_length)) {
@@ -1118,41 +767,67 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
     ms_linedetection = end_time - start_time;
   }
 
-  auto line_sum = 0;
+  auto num_records = 0;
   for (size_t t = 0; t < size_t(num_threads); t++) {
-    // std::cout << t << ": # of lines = " << line_infos[t].size() << std::endl;
-    line_sum += line_infos[t].size();
+    num_records += line_infos[t].size();
   }
-  // std::cout << "# of lines = " << line_sum << std::endl;
 
-  // 2. allocate buffer
+  if (option.verbose && warn) {
+    (*warn) += "# of records = " + std::to_string(num_records) + "\n";
+  }
+
+  // 2. allocate per thread buffer
   auto t_alloc_start = std::chrono::high_resolution_clock::now();
+
+  std::vector<std::vector<float>> line_buffer;
+  line_buffer.resize(size_t(num_threads));
   {
-#if 0
-    for (size_t t = 0; t < num_threads; t++) {
-      commands[t].reserve(line_infos[t].size());
+    for (size_t t = 0; t < size_t(num_threads); t++) {
+      // Heuristics. byte size = # of chars / 4
+      line_buffer[t].reserve(line_infos[t].size() / 4);
     }
-#endif
   }
 
   ms_alloc = std::chrono::high_resolution_clock::now() - t_alloc_start;
 
-  // 2. parse each line in parallel.
+  // Records # of fields per thread.
+  // After finishing parsing, check if these values are all same.
+  std::vector<int> num_fields_per_thread(size_t(num_threads), -1);
+
+  // 3. parse each line in parallel.
   {
     StackVector<std::thread, 16> workers;
     auto t_start = std::chrono::high_resolution_clock::now();
+
+    bool invalid_csv = false;
 
     for (size_t t = 0; t < size_t(num_threads); t++) {
       workers->push_back(std::thread([&, t]() {
         for (size_t i = 0; i < line_infos[t].size(); i++) {
           StackVector<float, 512> values;
           // TODO(LTE): Allow empty line before the header
-          bool is_header = (t == 0) && (i == 0);
+          //bool is_header = (t == 0) && (i == 0);
+          // TODO(LTE): parse header string
           bool ret = ParseLine(&buffer[line_infos[t][i].pos],
-                               line_infos[t][i].len, &values, is_header);
+                               line_infos[t][i].len, &values, option.delimiter);
           if (ret) {
-            // TODO
+
+            if (num_fields_per_thread[t] == -1) {
+              num_fields_per_thread[t] = int(values->size());
+            }
+
+            // All records should have same number of fields.
+            if (num_fields_per_thread[t] != int(values->size())) {
+              invalid_csv = true;
+              break;
+            }
+
+            for (size_t k = 0; k < values->size(); k++) {
+              line_buffer[t].push_back(values[k]);
+            }
           }
+
+
         }
       }));
     }
@@ -1164,224 +839,64 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
     auto t_end = std::chrono::high_resolution_clock::now();
 
     ms_parse = t_end - t_start;
+
+    if (invalid_csv) {
+      if (err) {
+        // TODO(LTE): Show the linue number of invalid record.
+        (*err) += "The number of fields must be same for all records.\n";
+      }
+      return false;
+    }
   }
 
-#if 0
-  auto command_sum = 0;
-  for (size_t t = 0; t < num_threads; t++) {
-    // std::cout << t << ": # of commands = " << commands[t].size() <<
-    // std::endl;
-    command_sum += commands[t].size();
-  }
-  // std::cout << "# of commands = " << command_sum << std::endl;
+  // Check if all records have same the number of fields.
 
-  size_t num_v = 0;
-  size_t num_vn = 0;
-  size_t num_vt = 0;
-  size_t num_f = 0;
-  size_t num_indices = 0;
-  for (size_t t = 0; t < num_threads; t++) {
-    num_v += command_count[t].num_v;
-    num_vn += command_count[t].num_vn;
-    num_vt += command_count[t].num_vt;
-    num_f += command_count[t].num_f;
-    num_indices += command_count[t].num_indices;
+  int num_fields = num_fields_per_thread[0];
+  if (num_fields <= 0) {
+    if (err) {
+      (*err) += "It looks thread 0 failed to parse CSV records.\n";
+    }
+    return false;
   }
 
-  // std::cout << "# v " << num_v << std::endl;
-  // std::cout << "# vn " << num_vn << std::endl;
-  // std::cout << "# vt " << num_vt << std::endl;
-  // std::cout << "# f " << num_f << std::endl;
+  for (size_t i = 1; i < num_fields_per_thread.size(); i++) {
+    if (num_fields_per_thread[i] != -1) {
+      if (num_fields_per_thread[i] != num_fields) {
+        if (err) {
+          std::stringstream ss;
+          ss << "Thread " << i << " has num_fields " << num_fields_per_thread[i] << " but it should be " << num_fields << " (thread 0)\n";
+          (*err) += ss.str();
+        }
+        return false;
+      }
+    }
+  }
 
-  // 4. merge
-  // @todo { parallelize merge. }
+  // 4. Construct CSV information.
   {
     auto t_start = std::chrono::high_resolution_clock::now();
 
-    attrib->vertices.resize(num_v * 3);
+    csv->num_fields = size_t(num_fields);
 
-    size_t v_offsets[kMaxThreads];
+    // TODO(LTE): Optimize concatenation. use emplace_back + std::move to remove temporary memory, or use memcpy?
 
-    v_offsets[0] = 0;
+    // Actual # of elements may be less than `num_records * num_fields`
+    csv->values.clear();
 
-    for (size_t t = 1; t < num_threads; t++) {
-      v_offsets[t] = v_offsets[t - 1] + command_count[t - 1].num_v;
-    }
-
-    StackVector<std::thread, 16> workers;
-
-    for (size_t t = 0; t < num_threads; t++) {
-      workers->push_back(std::thread([&, t]() {
-        size_t v_count = v_offsets[t];
-
-        for (size_t i = 0; i < commands[t].size(); i++) {
-          if (commands[t][i].type == COMMAND_EMPTY) {
-            continue;
-          } else if (commands[t][i].type == COMMAND_USEMTL) {
-            if (commands[t][i].material_name &&
-                commands[t][i].material_name_len > 0 &&
-                // check if there are still faces after this command
-                face_count < num_indices) {
-              // Find next face
-              bool found = false;
-              size_t i_start = i + 1, t_next, i_next;
-              for (t_next = t; t_next < num_threads; t_next++) {
-                for (i_next = i_start; i_next < commands[t_next].size();
-                     i_next++) {
-                  if (commands[t_next][i_next].type == COMMAND_F) {
-                    found = true;
-                    break;
-                  }
-                }
-                if (found) break;
-                i_start = 0;
-              }
-              // Assign material to this face
-              if (found) {
-                std::string material_name(commands[t][i].material_name,
-                                          commands[t][i].material_name_len);
-                for (size_t k = 0;
-                     k < commands[t_next][i_next].f_num_verts.size(); k++) {
-                  if (material_map.find(material_name) != material_map.end()) {
-                    attrib->material_ids[face_count + k] =
-                        material_map[material_name];
-                  } else {
-                    // Assign invalid material ID
-                    // Set a different value than the default, to
-                    // prevent following faces from being assigned a valid
-                    // material
-                    attrib->material_ids[face_count + k] = -2;
-                  }
-                }
-              }
-            }
-          } else if (commands[t][i].type == COMMAND_V) {
-            attrib->vertices[3 * v_count + 0] = commands[t][i].vx;
-            attrib->vertices[3 * v_count + 1] = commands[t][i].vy;
-            attrib->vertices[3 * v_count + 2] = commands[t][i].vz;
-            v_count++;
-          } else if (commands[t][i].type == COMMAND_VN) {
-            attrib->normals[3 * n_count + 0] = commands[t][i].nx;
-            attrib->normals[3 * n_count + 1] = commands[t][i].ny;
-            attrib->normals[3 * n_count + 2] = commands[t][i].nz;
-            n_count++;
-          } else if (commands[t][i].type == COMMAND_VT) {
-            attrib->texcoords[2 * t_count + 0] = commands[t][i].tx;
-            attrib->texcoords[2 * t_count + 1] = commands[t][i].ty;
-            t_count++;
-          } else if (commands[t][i].type == COMMAND_F) {
-            for (size_t k = 0; k < commands[t][i].f.size(); k++) {
-              index_t &vi = commands[t][i].f[k];
-              int vertex_index = fixIndex(vi.vertex_index, v_count);
-              int texcoord_index = fixIndex(vi.texcoord_index, t_count);
-              int normal_index = fixIndex(vi.normal_index, n_count);
-              attrib->indices[f_count + k] =
-                  index_t(vertex_index, texcoord_index, normal_index);
-            }
-            for (size_t k = 0; k < commands[t][i].f_num_verts.size(); k++) {
-              attrib->face_num_verts[face_count + k] =
-                  commands[t][i].f_num_verts[k];
-            }
-
-            f_count += commands[t][i].f.size();
-            face_count += commands[t][i].f_num_verts.size();
-          }
-        }
-      }));
-    }
-
-    for (size_t t = 0; t < workers->size(); t++) {
-      workers[t].join();
-    }
-
-    // To each face with uninitialized material id,
-    // assign the material id of the last face preceding it that has one
-    for (size_t face_count = 1; face_count < num_indices; ++face_count)
-      if (attrib->material_ids[face_count] == -1)
-        attrib->material_ids[face_count] = attrib->material_ids[face_count - 1];
-
-    auto t_end = std::chrono::high_resolution_clock::now();
-    ms_merge = t_end - t_start;
-  }
-#endif
-
-  auto t4 = std::chrono::high_resolution_clock::now();
-
-#if 0
-  // 5. Construct CSV information.
-  {
-    auto t_start = std::chrono::high_resolution_clock::now();
-
-    // @todo { Can we boost the performance by multi-threaded execution? }
-    int face_count = 0;
-    shape_t shape;
-    shape.face_offset = 0;
-    shape.length = 0;
-    int face_prev_offset = 0;
-    for (size_t t = 0; t < num_threads; t++) {
-      for (size_t i = 0; i < commands[t].size(); i++) {
-        if (commands[t][i].type == COMMAND_O ||
-            commands[t][i].type == COMMAND_G) {
-          std::string name;
-          if (commands[t][i].type == COMMAND_O) {
-            name = std::string(commands[t][i].object_name,
-                               commands[t][i].object_name_len);
-          } else {
-            name = std::string(commands[t][i].group_name,
-                               commands[t][i].group_name_len);
-          }
-
-          if (face_count == 0) {
-            // 'o' or 'g' appears before any 'f'
-            shape.name = name;
-            shape.face_offset = face_count;
-            face_prev_offset = face_count;
-          } else {
-            if (shapes->size() == 0) {
-              // 'o' or 'g' after some 'v' lines.
-              // create a shape with null name
-              shape.length = face_count - face_prev_offset;
-              face_prev_offset = face_count;
-
-              shapes->push_back(shape);
-
-            } else {
-              if ((face_count - face_prev_offset) > 0) {
-                // push previous shape
-                shape.length = face_count - face_prev_offset;
-                shapes->push_back(shape);
-                face_prev_offset = face_count;
-              }
-            }
-
-            // redefine shape.
-            shape.name = name;
-            shape.face_offset = face_count;
-            shape.length = 0;
-          }
-        }
-        if (commands[t][i].type == COMMAND_F) {
-          // Consider generation of multiple faces per `f` line by triangulation
-          face_count += commands[t][i].f_num_verts.size();
-        }
+    for (size_t t = 0; t < size_t(num_threads); t++) {
+      for (size_t i = 0; i < line_buffer[t].size(); i++) {
+        csv->values.push_back(line_buffer[t][i]);
       }
     }
 
-    if ((face_count - face_prev_offset) > 0) {
-      shape.length = face_count - shape.face_offset;
-      if (shape.length > 0) {
-        shapes->push_back(shape);
-      }
-    } else {
-      // Guess no 'v' line occurrence after 'o' or 'g', so discards current
-      // shape information.
-    }
+    csv->num_records = csv->values.size() / csv->num_fields;
 
     auto t_end = std::chrono::high_resolution_clock::now();
 
     ms_construct = t_end - t_start;
   }
-#endif
+
+  auto t4 = std::chrono::high_resolution_clock::now();
 
   std::chrono::duration<double, std::milli> ms_total = t4 - t1;
   if (option.verbose) {
@@ -1391,7 +906,6 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
       ss << "  line detection : " << ms_linedetection.count() << " ms\n";
       ss << "  alloc buf      : " << ms_alloc.count() << " ms\n";
       ss << "  parse          : " << ms_parse.count() << " ms\n";
-      ss << "  merge          : " << ms_merge.count() << " ms\n";
       ss << "  construct      : " << ms_construct.count() << " ms\n";
 
       (*warn) += ss.str();
@@ -1400,6 +914,39 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 
   return true;
 }
+
+#if !defined(NANOCSV_NO_IO)
+template <typename T>
+bool ParseCSVFromFile(const std::string &filename, const ParseOption &option,
+                      CSV<T> *csv, std::string *warn, std::string *err) {
+  std::ifstream ifs(filename);
+  if (!ifs) {
+    if (err) {
+      (*err) =
+          "Failed to open file. File may not be found : " + filename + "\n";
+    }
+    return false;
+  }
+
+  ifs.seekg(0, ifs.end);
+  size_t sz = static_cast<size_t>(ifs.tellg());
+  ifs.seekg(0, ifs.beg);
+
+  if (sz < 1) {
+    if (err) {
+      (*err) = "File size is zero : " + filename + "\n";
+    }
+    return false;
+  }
+
+  std::vector<char> buffer;
+  buffer.resize(sz);
+
+  ifs.read(buffer.data(), static_cast<std::streamsize>(sz));
+
+  return ParseCSVFromMemory(buffer.data(), sz, option, csv, warn, err);
+}
+#endif
 
 }  // namespace nanocsv
 
