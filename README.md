@@ -9,6 +9,7 @@ NanoCSV is a fater C++11 multithreaded header-only CSV parser.
 
 In development.
 Currently CSV without no header(e.g. Tensor data saved by `numpy.savetxt`) are supported.
+Not recommended to use NanoCSV in production at the moment.
 
 ## Requirements
 
