@@ -1,6 +1,7 @@
 # NanoCSV, Faster C++11 multithreaded header-only CSV parser
 
 NanoCSV is a fater C++11 multithreaded header-only CSV parser.
+NanoCSV is designed for CSV data with numeric values.
 
 ![tty](img/tty.gif)
 
