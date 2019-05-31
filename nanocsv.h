@@ -48,6 +48,7 @@ THE SOFTWARE.
 #include <map>
 #include <sstream>
 #include <vector>
+#include <algorithm>
 
 #if !defined(NANOCSV_NO_IO)
 #include <cstdio>
