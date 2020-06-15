@@ -538,6 +538,7 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 template <typename T>
 bool ParseCSVFromFile(const std::string &filename, const ParseOption &option,
                       CSV<T> *csv, std::string *warn, std::string *err);
+
 #endif
 
 }  // namespace nanocsv
@@ -701,6 +702,12 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 
     auto start_time = std::chrono::high_resolution_clock::now();
     auto chunk_size = buffer_length / size_t(num_threads);
+
+    // CSV data is too small. use single-threaded parsing
+    if (buffer_length < size_t(num_threads)) {
+      num_threads = 1;
+      chunk_size = buffer_length;
+    }
 
     for (size_t t = 0; t < static_cast<size_t>(num_threads); t++) {
       workers->push_back(std::thread([&, t]() {
