@@ -332,7 +332,7 @@ static inline int my_atoi(const char *c) {
 //  - s >= s_end.
 //  - parse failure.
 //
-static bool tryParseDouble(const char *s, const char *s_end, double *result) {
+static inline bool tryParseDouble(const char *s, const char *s_end, double *result) {
   if (s >= s_end) {
     return false;
   }
