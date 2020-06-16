@@ -30,7 +30,6 @@ THE SOFTWARE.
 
 #if !defined(NANOCSV_NO_IO)
 #ifdef _WIN32
-#define atoll(S) _atoi64(S)
 #include <windows.h>
 #else
 #include <fcntl.h>
