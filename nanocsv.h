@@ -277,7 +277,7 @@ class CSV {
   std::vector<T>
       values;  // 1D linearized array. The length is num_records * num_fields`
 
-  std::vector<std::string> header;  // size() == num_fields
+  std::vector<std::string> header;
 
   size_t num_fields;
   size_t num_records;
@@ -650,15 +650,45 @@ static inline bool is_line_ending(const char *p, size_t i, size_t end_i) {
   return false;
 }
 
+static inline bool SkipUTF8BOM(const char *src, const size_t src_len, const char **dst, size_t *dst_len)
+{
+  if (src_len >= 3) {
+    if ((uint8_t(src[0]) == 0xef) && (uint8_t(src[1]) == 0xbb) && (uint8_t(src[2]) == 0xbf)) {
+      (*dst) = src + 3;
+      (*dst_len) = src_len - 3;
+      return true;
+    }
+  }
+
+  (*dst) = src;
+  (*dst_len) = src_len;
+
+  return false;
+}
+
 template <typename T>
-bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
+bool ParseCSVFromMemory(const char *_buffer, const size_t _buffer_length,
                         const ParseOption &option, CSV<T> *csv,
                         std::string *warn, std::string *err) {
-  if (buffer_length < 1) {
+  if (_buffer_length < 1) {
     if (err) {
       (*err) = "`buffer_length` too short.\n";
     }
     return false;
+  }
+
+  const char *buffer{nullptr};
+  size_t buffer_length{0};
+
+  // Skip UTF-8 BOM if exists
+  SkipUTF8BOM(_buffer, _buffer_length, &buffer, &buffer_length);
+
+  if (!option.ignore_header) {
+    // read header
+    // this process is done in single threaded.
+
+    // TODO(LTE): Implement
+
   }
 
   csv->values.clear();
