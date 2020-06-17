@@ -90,6 +90,8 @@ int main(int argc, char **argv)
 
 ## TODO
 
+* [ ] Support UTF-8
+  * [ ] Detect BOM header
 * [ ] mmap based API
 * [ ] Reduce memory usage. Currently nanocsv allocates some memory for intermediate buffer.
 * [ ] Robust error handling.
