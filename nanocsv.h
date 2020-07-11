@@ -30,7 +30,11 @@ THE SOFTWARE.
 
 #if !defined(NANOCSV_NO_IO)
 #ifdef _WIN32
+#if defined(__MINGW32__)
 #include <windows.h>
+#else
+#include <Windows.h>
+#endif
 #else
 #include <fcntl.h>
 #include <sys/mman.h>
