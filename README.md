@@ -91,11 +91,13 @@ int main(int argc, char **argv)
 ## TODO
 
 * [ ] Support UTF-8
-  * [ ] Detect BOM header
+  * [x] Detect BOM header
+* [ ] Support UTF-16 and UTF-32?
 * [ ] mmap based API
 * [ ] Reduce memory usage. Currently nanocsv allocates some memory for intermediate buffer.
 * [ ] Robust error handling.
-* [ ] Support header.
+* [x] Support header.
+* [ ] Support comment line(A line start with `#`)
 * [ ] Support different number of fields among records;
 * [ ] Parse complex value(e.g. `3.0 + 4.2j`)
 * [ ] Parse some special values, for example `#INF`, `#NAN`.
