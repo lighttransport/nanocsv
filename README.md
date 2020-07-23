@@ -50,6 +50,7 @@ int main(int argc, char **argv)
   option.delimiter = delimiter;
   option.req_num_threads = num_threads;
   option.verbose = true; // verbse message will be stored in `warn`.
+  option.ignore_header = true; // Parse header(the first line. default = true).
 
   std::string warn;
   std::string err;
@@ -78,6 +79,13 @@ int main(int argc, char **argv)
   // values are 1D array of length [num_records * num_fields]
   // std::cout << csv.values[4 * num_fields + 3] << "\n";
 
+  // header string is stored in `csv.header`
+  if (!option.ignore_header) {
+    for (size_t i = 0; i < csv.header.size(); i++) {
+      std::cout << csv.header[i] << "\n";
+    }
+  }
+
 
   return EXIT_SUCCESS;
 }
@@ -92,6 +100,7 @@ int main(int argc, char **argv)
 
 * [ ] Support UTF-8
   * [x] Detect BOM header
+  * [ ] UTF-8 string in header
 * [ ] Support UTF-16 and UTF-32?
 * [ ] mmap based API
 * [ ] Reduce memory usage. Currently nanocsv allocates some memory for intermediate buffer.
