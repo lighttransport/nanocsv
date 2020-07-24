@@ -58,6 +58,13 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
+  if (option.replace_na) {
+    std::cout << "N/A value replaced with " << option.na_value << "\n";
+  }
+  if (option.replace_null) {
+    std::cout << "Null(empty) value replaced with " << option.null_value << "\n";
+  }
+
   std::cout << "num records(rows) = " << csv.num_records << "\n";
   std::cout << "num fields(columns) = " << csv.num_fields << "\n";
 
