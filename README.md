@@ -1,5 +1,7 @@
 # NanoCSV, Faster C++11 multithreaded header-only CSV parser
 
+![C/C++ CI](https://github.com/lighttransport/nanocsv/workflows/C/C++%20CI/badge.svg)
+
 NanoCSV is a fater C++11 multithreaded header-only CSV parser with only STL dependency.
 NanoCSV is designed for CSV data with numeric values.
 
