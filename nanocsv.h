@@ -494,6 +494,56 @@ fail:
   return false;
 }
 
+//
+// Detect nan, inf
+//
+template<typename T>
+static inline bool tryParseSpecial(const char *s, const char *s_end, T *result) {
+
+  if (s_end <= s) {
+    return false;
+  }
+
+  size_t str_len = size_t(ptrdiff_t(s_end - s));
+
+  static_assert(std::numeric_limits<T>::has_quiet_NaN, "quet NaN must be supported on the system");
+  static_assert(std::numeric_limits<T>::has_infinity, "inifnity must be supported on the system");
+
+  if (((str_len >= 3) && (strncmp(s, "nan", 3) == 0)) ||
+      ((str_len >= 3) && (strncmp(s, "NAN", 3) == 0))) {
+
+    (*result) = std::numeric_limits<T>::quiet_NaN();
+
+    return true;
+  }
+
+  if (((str_len >= 4) && (strncmp(s, "-nan", 4) == 0)) ||
+      ((str_len >= 4) && (strncmp(s, "-NAN", 4) == 0))) {
+
+    (*result) = -std::numeric_limits<T>::quiet_NaN();
+
+    return true;
+  }
+
+  if (((str_len >= 3) && (strncmp(s, "inf", 3) == 0)) ||
+      ((str_len >= 3) && (strncmp(s, "INF", 3) == 0))) {
+
+    (*result) = std::numeric_limits<T>::infinity();
+
+    return true;
+  }
+
+  if (((str_len >= 4) && (strncmp(s, "-inf", 4) == 0)) ||
+      ((str_len >= 4) && (strncmp(s, "-INF", 4) == 0))) {
+
+    (*result) = -std::numeric_limits<T>::infinity();
+
+    return true;
+  }
+
+  return false;
+}
+
 class ParseOption {
  public:
   ParseOption()
@@ -600,11 +650,21 @@ bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
       continue;
     }
 
-    double value;
-    if (tryParseDouble(p + loc, p + delimiter_loc, &value)) {
-      (*values)->push_back(static_cast<T>(value));
-    } else {
-      // TODO(LTE): Report error.
+    {
+      // nan, inf
+      // TODO(LTE): Support #NAN, #INF, etc(non-standard format used in VS2013 or earlier).
+      T special_value;
+      if (tryParseSpecial(p + loc, p + delimiter_loc, &special_value)) {
+        //std::cout << "special: " << special_value << "\n";
+        (*values)->push_back(static_cast<T>(special_value));
+      } else {
+        double value;
+        if (tryParseDouble(p + loc, p + delimiter_loc, &value)) {
+          (*values)->push_back(static_cast<T>(value));
+        } else {
+          // TODO(LTE): Set NaN or report error.
+        }
+      }
     }
 
     // move to the next of delimiter character.

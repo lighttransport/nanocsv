@@ -91,6 +91,13 @@ int main(int argc, char **argv)
 }
 ```
 
+## NaN, Inf
+
+nanocsv supports parsing
+
+* `nan`, `-nan` as NaN, -NaN
+* `inf`, `-inf` as Inf, -Inf
+
 ## Compiler options
 
 * NANOCSV_NO_IO : Disable I/O(file access, stdio, mmap).
@@ -109,7 +116,8 @@ int main(int argc, char **argv)
 * [ ] Support comment line(A line start with `#`)
 * [ ] Support different number of fields among records;
 * [ ] Parse complex value(e.g. `3.0 + 4.2j`)
-* [ ] Parse some special values, for example `#INF`, `#NAN`.
+* [ ] Parse special value like `#INF`, `#NAN`.
+  * https://docs.microsoft.com/en-us/cpp/c-runtime-library/format-specification-syntax-printf-and-wprintf-functions?view=vs-2019
 * [ ] CSV writer.
 * [ ] Write tests.
 * [ ] Remove libm(`pow`) dependency.
@@ -179,4 +187,5 @@ MIT License
 ### Third-party license
 
 * stack_container : Copyright (c) 2006-2008 The Chromium Authors. BSD-style license.
+* acutest : MIT license. Used for unit tester.
 
