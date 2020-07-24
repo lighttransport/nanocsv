@@ -48,7 +48,7 @@ int main(int argc, char **argv)
     delimiter = argv[3][0];
   }
 
-  nanocsv::ParseOption option;
+  nanocsv::ParseOption<float> option;
   option.delimiter = delimiter;
   option.req_num_threads = num_threads;
   option.verbose = true; // verbse message will be stored in `warn`.
@@ -99,6 +99,17 @@ nanocsv supports parsing
 
 * `nan`, `-nan` as NaN, -NaN
 * `inf`, `-inf` as Inf, -Inf
+
+## Support for N/A and null value
+
+In default, missing value(e.g. N/A(including invalid numeric string), NaN) are replaced by `nan`, and null(empty) value(e.g. "") are replaced by `nan`.
+
+You can control the behavior with the following parametes in `ParseOption`.
+
+* `replace_na` : Replace N/A, NaN value?
+  * `na_value` : The value to be replaced for N/A, NaN value
+* `replace_null` : Replace null(empty) value?
+  * `null_value` : The value to be replaced for null value
 
 ## Compiler options
 

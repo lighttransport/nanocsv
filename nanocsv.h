@@ -544,18 +544,30 @@ static inline bool tryParseSpecial(const char *s, const char *s_end, T *result) 
   return false;
 }
 
+template<typename T>
 class ParseOption {
  public:
   ParseOption()
       : req_num_threads(-1),
         ignore_header(false),
         verbose(false),
-        delimiter(' ') {}
+        delimiter(' '),
+        replace_na(true),
+        na_value(std::numeric_limits<T>::quiet_NaN()),
+        replace_null(true),
+        null_value(std::numeric_limits<T>::quiet_NaN()) {}
 
-  int req_num_threads;
-  bool ignore_header;
-  bool verbose;
-  char delimiter;
+  int req_num_threads{-1};
+  bool ignore_header{false};
+  bool verbose{false};
+  char delimiter{' '};
+
+  bool replace_na{true};  // Replace missing or invalid value(e.g. N/A, NaN)?
+  T na_value{std::numeric_limits<T>::quiet_NaN()}; // Replace N/A value with this value(when `replace_na` is true)
+
+  bool replace_null{true};  // Replace null(empty) value?
+  T null_value{std::numeric_limits<T>::quiet_NaN()}; // Replace null(empty) value with this value(when `replace_null` is true)
+
 };
 
 ///
@@ -572,7 +584,7 @@ class ParseOption {
 ///
 template <typename T>
 bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
-                        const ParseOption &option, CSV<T> *csv,
+                        const ParseOption<T> &option, CSV<T> *csv,
                         std::string *warn, std::string *err);
 
 #if !defined(NANOCSV_NO_IO)
@@ -589,7 +601,7 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 /// @return true upon success. false when error happens during parsing.
 ///
 template <typename T>
-bool ParseCSVFromFile(const std::string &filename, const ParseOption &option,
+bool ParseCSVFromFile(const std::string &filename, const ParseOption<T> &option,
                       CSV<T> *csv, std::string *warn, std::string *err);
 
 #endif
@@ -608,15 +620,16 @@ namespace nanocsv {
 //
 template <typename T>
 bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
-               const char delimiter) {
+               const ParseOption<T> &option) {
   if ((p == nullptr) || (p_len < 1)) {
     return false;
   }
 
   size_t loc = 0;
-  if (delimiter != ' ') {
+  if (option.delimiter != ' ') {
     // skip leading space.
     for (size_t i = loc; i < p_len; i++, loc++) {
+      // TODO(LTE): Consider `\f` and `\v`?
       bool isspace = (p[i] == ' ') || (p[i] == '\t');
       if (!isspace) {
         break;
@@ -639,15 +652,43 @@ bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
     // find delimiter
     size_t delimiter_loc = loc;
     for (size_t i = loc; i < p_len; i++, delimiter_loc++) {
-      if ((p[i] == delimiter) || (p[i] == '\0')) {
+      if ((p[i] == option.delimiter) || (p[i] == '\0')) {
         break;
       }
     }
 
     if (loc == delimiter_loc) {
+      // null.
       // something like ",,2.3,,,"
       loc++;
+
+      if (option.replace_null) {
+        (*values)->push_back(option.null_value);
+      }
+
       continue;
+    }
+
+    // empty?
+    {
+      bool empty = true;
+      for (size_t i = loc; i < delimiter_loc; i++) {
+        if (!std::isspace(int(p[i]))) {
+          empty = false;
+          break;
+        }
+      }
+
+      if (empty) {
+        if (option.replace_null) {
+          (*values)->push_back(option.null_value);
+        }
+
+        // move to the next of delimiter character.
+        loc = delimiter_loc + 1;
+
+        continue;
+      }
     }
 
     {
@@ -655,14 +696,20 @@ bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
       // TODO(LTE): Support #NAN, #INF, etc(non-standard format used in VS2013 or earlier).
       T special_value;
       if (tryParseSpecial(p + loc, p + delimiter_loc, &special_value)) {
-        //std::cout << "special: " << special_value << "\n";
-        (*values)->push_back(static_cast<T>(special_value));
+        if (option.replace_na && std::isnan(special_value)) {
+          (*values)->push_back(static_cast<T>(option.na_value));
+        } else {
+          (*values)->push_back(static_cast<T>(special_value));
+        }
       } else {
         double value;
         if (tryParseDouble(p + loc, p + delimiter_loc, &value)) {
           (*values)->push_back(static_cast<T>(value));
         } else {
-          // TODO(LTE): Set NaN or report error.
+          if (option.replace_na) {
+            (*values)->push_back(static_cast<T>(option.na_value));
+          }
+          // TODO(LTE): report error?.
         }
       }
     }
@@ -670,13 +717,30 @@ bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
     // move to the next of delimiter character.
     loc = delimiter_loc + 1;
 
-    if (delimiter != ' ') {
+    if (option.delimiter != ' ') {
+
       // skip leading space.
       for (size_t i = loc; i < p_len; i++, loc++) {
         bool isspace = (p[i] == ' ') || (p[i] == '\t');
         if (!isspace) {
           break;
         }
+      }
+
+      // delimiter, then spaces and EOF ",  \0" but not ends with delimiter ",\0"
+      if ((loc == p_len) && (delimiter_loc != (p_len-1))) {
+        if (option.replace_null) {
+          (*values)->push_back(option.null_value);
+        }
+      }
+    }
+  }
+
+  if (option.delimiter != ' ') {
+    // last character is the delimtier
+    if (p[p_len-1] == option.delimiter) {
+      if (option.replace_null) {
+        (*values)->push_back(option.null_value);
       }
     }
   }
@@ -785,7 +849,7 @@ static inline bool SkipUTF8BOM(const char *src, const size_t src_len, const char
 
 template <typename T>
 bool ParseCSVFromMemory(const char *_buffer, const size_t _buffer_length,
-                        const ParseOption &option, CSV<T> *csv,
+                        const ParseOption<T> &option, CSV<T> *csv,
                         std::string *warn, std::string *err) {
   if (_buffer_length < 1) {
     if (err) {
@@ -982,7 +1046,7 @@ bool ParseCSVFromMemory(const char *_buffer, const size_t _buffer_length,
 
           // TODO(LTE): parse header string
           bool ret = ParseLine(&buffer[line_infos[t][i].pos],
-                               line_infos[t][i].len, &values, option.delimiter);
+                               line_infos[t][i].len, &values, option);
 
           if (ret) {
             if (num_fields_per_thread[t] == -1) {
@@ -1139,7 +1203,7 @@ bool ParseCSVFromMemory(const char *_buffer, const size_t _buffer_length,
 
 #if !defined(NANOCSV_NO_IO)
 template <typename T>
-bool ParseCSVFromFile(const std::string &filename, const ParseOption &option,
+bool ParseCSVFromFile(const std::string &filename, const ParseOption<T> &option,
                       CSV<T> *csv, std::string *warn, std::string *err) {
   std::ifstream ifs(filename);
   if (!ifs) {

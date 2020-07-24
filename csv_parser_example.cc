@@ -31,7 +31,7 @@ int main(int argc, char **argv)
     ignore_header = static_cast<bool>(std::atoi(argv[4]));
   }
 
-  nanocsv::ParseOption option;
+  nanocsv::ParseOption<float> option;
   option.delimiter = delimiter;
   option.req_num_threads = num_threads;
   option.verbose = true;
