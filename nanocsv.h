@@ -59,6 +59,13 @@ THE SOFTWARE.
 #include <iostream>
 #endif
 
+#if defined(NANOCSV_WITH_RYU)
+#if !defined(NANOCSV_WITH_RYU_NOINCLUDE)
+// Set path to Ryu in your compiler flags
+#include <ryu/ryu_parse.h>
+#endif
+#endif
+
 #include <atomic>  // C++11
 #include <chrono>  // C++11
 #include <thread>  // C++11
@@ -308,37 +315,65 @@ static inline int my_atoi(const char *c) {
 }
 #endif
 
-// Tries to parse a floating point number located at s.
-//
-// s_end should be a location in the string where reading should absolutely
-// stop. For example at the end of the string, to prevent buffer overflows.
-//
-// Parses the following EBNF grammar:
-//   sign    = "+" | "-" ;
-//   END     = ? anything not in digit ?
-//   digit   = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
-//   integer = [sign] , digit , {digit} ;
-//   decimal = integer , ["." , integer] ;
-//   float   = ( decimal , END ) | ( decimal , ("E" | "e") , integer , END ) ;
-//
-//  Valid strings are for example:
-//   -0  +3.1417e+2  -0.0E-3  1.0324  -1.41   11e2
-//
-// If the parsing is a success, result is set to the parsed value and true
-// is returned.
-//
-// The function is greedy and will parse until any of the following happens:
-//  - a non-conforming character is encountered.
-//  - s_end is reached.
-//
-// The following situations triggers a failure:
-//  - s >= s_end.
-//  - parse failure.
-//
 static inline bool tryParseDouble(const char *s, const char *s_end, double *result) {
   if (s >= s_end) {
     return false;
   }
+
+#if defined(NANOCSV_WITH_RYU)
+  if ((s_end - s) > 16384) {
+    // too long.
+    return false;
+  }
+
+  std::string str(s, s_end);
+  // remove leading and trailing whitespaces.
+  // https://stackoverflow.com/questions/1798112/removing-leading-and-trailing-spaces-from-a-string
+  const char *t_char = " \t\n\r\f\v"; // or std::isspace
+  str.erase(str.find_last_not_of(t_char) + 1);
+  str.erase(0, str.find_first_not_of(t_char));
+
+  double dval;
+  Status status = s2d_n(str.c_str(), int(str.size()), &dval);
+  if (status == SUCCESS) {
+    (*result) = dval;
+    return true;
+  } else if (status == INPUT_TOO_LONG) {
+    // fallback to our parser.
+  } else {
+    // Invalid: Too short or MALFORMED
+    return false;
+  }
+
+#endif
+
+  // Tries to parse a floating point number located at s.
+  //
+  // s_end should be a location in the string where reading should absolutely
+  // stop. For example at the end of the string, to prevent buffer overflows.
+  //
+  // Parses the following EBNF grammar:
+  //   sign    = "+" | "-" ;
+  //   END     = ? anything not in digit ?
+  //   digit   = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+  //   integer = [sign] , digit , {digit} ;
+  //   decimal = integer , ["." , integer] ;
+  //   float   = ( decimal , END ) | ( decimal , ("E" | "e") , integer , END ) ;
+  //
+  //  Valid strings are for example:
+  //   -0  +3.1417e+2  -0.0E-3  1.0324  -1.41   11e2
+  //
+  // If the parsing is a success, result is set to the parsed value and true
+  // is returned.
+  //
+  // The function is greedy and will parse until any of the following happens:
+  //  - a non-conforming character is encountered.
+  //  - s_end is reached.
+  //
+  // The following situations triggers a failure:
+  //  - s >= s_end.
+  //  - parse failure.
+  //
 
   double mantissa = 0.0;
   // This exponent is base 2 rather than 10.

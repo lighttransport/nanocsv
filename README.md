@@ -114,6 +114,8 @@ You can control the behavior with the following parametes in `ParseOption`.
 ## Compiler options
 
 * NANOCSV_NO_IO : Disable I/O(file access, stdio, mmap).
+* NANOCSV_WITH_RYU : Use ryu library to parse floating-point string. https://github.com/ulfjack/ryu . This will give precise handling of floating point values.
+  * NANOCSV_WITH_RYU_NOINCLUDE: Do not include Ryu header files in `nanocsv.h`. This is useful when you want to include Ryu header files outside of `nanocsv.h`.
 
 
 ## TODO
@@ -201,4 +203,5 @@ MIT License
 
 * stack_container : Copyright (c) 2006-2008 The Chromium Authors. BSD-style license.
 * acutest : MIT license. Used for unit tester.
+* ryu : Apache 2.0 or Boost 1.0 dual license.
 
