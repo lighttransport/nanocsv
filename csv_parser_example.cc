@@ -1,19 +1,32 @@
 #define NANOCSV_IMPLEMENTATION
 #include "nanocsv.h"
 
+static void print_help() {
+  std::cout << "csv_parser_example input.csv (num_threads) (delimiter) (ignore_header)\n";
+  std::cout << "  num_threads: -1(= use all theads)\n";
+  std::cout << "  delimiter: ' '(whitespace)\n";
+  std::cout << "  ignore_header: 1(ignore header). 0 to consider header line\n";
+}
+
 int main(int argc, char **argv)
 {
   if (argc < 2) {
-    std::cout << "csv_parser_example input.csv (num_threads) (delimiter) (ignore_header)\n";
-    std::cout << "  num_threads: -1(= use all theads)\n";
-    std::cout << "  delimiter: ' '(whitespace)\n";
-    std::cout << "  ignore_header: 1(ignore header). 0 to consider header line\n";
+    print_help();
   }
 
   std::string filename("./data/array-4-5.csv");
   int num_threads = -1; // -1 = use all system threads
   char delimiter = ' ';
   bool ignore_header = true;
+
+  if (argc > 1) {
+    std::string s(argv[1]);
+
+    if ((s == "-h") || (s == "--help")) {
+      print_help();
+      exit(1);
+    }
+  }
 
   if (argc > 1) {
     filename = argv[1];
