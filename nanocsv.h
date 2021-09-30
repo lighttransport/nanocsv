@@ -1033,7 +1033,7 @@ bool ParseCSVFromMemory(const char *_buffer, const size_t _buffer_length,
   // 2. allocate per thread buffer
   auto t_alloc_start = std::chrono::high_resolution_clock::now();
 
-  std::vector<std::vector<float>> line_buffer;
+  std::vector<std::vector<T>> line_buffer;
   line_buffer.resize(size_t(num_threads));
   {
     for (size_t t = 0; t < size_t(num_threads); t++) {
