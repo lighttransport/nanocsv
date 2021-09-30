@@ -1060,7 +1060,7 @@ bool ParseCSVFromMemory(const char *_buffer, const size_t _buffer_length,
 
         bool first_line = true;
         for (size_t i = 0; i < line_infos[t].size(); i++) {
-          StackVector<float, 512> values;
+          StackVector<T, 512> values;
 
           if (line_infos[t][i].len < 1) {
             // Empty line. skip
