@@ -842,7 +842,7 @@ static std::vector<std::string> parse_header(const char *p, const size_t len, ch
     if (!in_quoted_string && (p[i] == delimiter)) {
       //std::cout << "s_start = " << s_start << ", (i-1) = " << i-1 << "\n";
       //std::cout << "p[i] = " << p[i] << "\n";
-      if (s_start < (i - 1)) {
+      if (s_start < i) {
         std::string tok(p + s_start, i - s_start);
 
         tokens.push_back(tok);
