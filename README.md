@@ -2,7 +2,7 @@
 
 ![C/C++ CI](https://github.com/lighttransport/nanocsv/workflows/C/C++%20CI/badge.svg)
 
-NanoCSV is a fater C++11 multithreaded header-only CSV parser with only STL dependency.
+NanoCSV is a faster C++11 multithreaded header-only CSV parser with only STL dependency.
 NanoCSV is designed for CSV data with numeric values.
 
 ![tty](img/tty.gif)
@@ -11,7 +11,6 @@ NanoCSV is designed for CSV data with numeric values.
 ## Status
 
 In development.
-Currently CSV without no header(e.g. Tensor data saved by `numpy.savetxt`) are supported.
 Not recommended to use NanoCSV in production at the moment.
 
 ## Requirements
@@ -111,6 +110,11 @@ You can control the behavior with the following parametes in `ParseOption`.
 * `replace_null` : Replace null(empty) value?
   * `null_value` : The value to be replaced for null value
 
+## Parse Text CSV
+
+Parsing Text CSV(each field is just a string) is also supported.
+(Use differnt API. See the source code for details.)
+
 ## Compiler options
 
 * NANOCSV_NO_IO : Disable I/O(file access, stdio, mmap).
@@ -122,17 +126,18 @@ You can control the behavior with the following parametes in `ParseOption`.
 
 * [ ] Support UTF-8
   * [x] Detect BOM header
-  * [ ] UTF-8 string in header
+  * [ ] Validate UTF-8 string
 * [ ] Support UTF-16 and UTF-32?
 * [ ] mmap based API
 * [ ] Reduce memory usage. Currently nanocsv allocates some memory for intermediate buffer.
 * [ ] Robust error handling.
 * [x] Support header.
-* [ ] Support comment line(A line start with `#`)
+* [x] Support comment line(A line start with `#`)
 * [ ] Support different number of fields among records;
 * [ ] Parse complex value(e.g. `3.0 + 4.2j`)
 * [ ] Parse special value like `#INF`, `#NAN`.
   * https://docs.microsoft.com/en-us/cpp/c-runtime-library/format-specification-syntax-printf-and-wprintf-functions?view=vs-2019
+* [ ] Use floaxie https://github.com/aclex/floaxie for better floating point string parsing.
 * [ ] CSV writer.
 * [ ] Write tests.
 * [ ] Remove libm(`pow`) dependency.

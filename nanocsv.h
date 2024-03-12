@@ -294,6 +294,17 @@ class CSV {
   size_t num_records;
 };
 
+class TextCSV {
+ public:
+  std::vector<std::string>
+      values;  // 1D linearized array. The length is num_records * num_fields`
+
+  std::vector<std::string> header;
+
+  size_t num_fields;
+  size_t num_records;
+};
+
 #define IS_DIGIT(x) \
   (static_cast<unsigned int>((x) - '0') < static_cast<unsigned int>(10))
 
@@ -605,8 +616,28 @@ class ParseOption {
 
 };
 
+class ParseTextOption {
+ public:
+  ParseTextOption()
+      : req_num_threads(-1),
+        ignore_header(false),
+        verbose(false),
+        delimiter(' '),
+        replace_null(false),
+        null_value("") {}
+
+  int req_num_threads{-1};
+  bool ignore_header{false};
+  bool verbose{false};
+  char delimiter{' '};
+
+  bool replace_null{false};  // Replace null(empty) value?
+  std::string null_value{""}; // Replace null(empty) value with this value(when `replace_null` is true)
+};
+
+
 ///
-/// Parse CSV data from memory(byte array).
+/// Parse numeric CSV data from memory(byte array).
 ///
 /// @param[in] buffer Input buffer(raw CSV text)
 /// @param[in] buffer_length Byte length of input buffer.
@@ -622,10 +653,27 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
                         const ParseOption<T> &option, CSV<T> *csv,
                         std::string *warn, std::string *err);
 
+///
+/// Parse string CSV data from memory(byte array).
+///
+/// @param[in] buffer Input buffer(raw CSV text)
+/// @param[in] buffer_length Byte length of input buffer.
+/// @param[in] option Parse option.
+/// @param[out] csv Parsed CSV data.
+/// @param[out] warn Warning message. Verbose message will be set when
+/// `option.verbose` is set to true.
+/// @param[out] err Error message(filled when return value is false)
+/// @return true upon success. false when error happens during parsing.
+///
+template <typename T>
+bool ParseTextCSVFromMemory(const char *buffer, const size_t buffer_length,
+                        const ParseOption<T> &option, CSV<T> *csv,
+                        std::string *warn, std::string *err);
+
 #if !defined(NANOCSV_NO_IO)
 
 ///
-/// Parse CSV data from a file.
+/// Parse numeric CSV data from a file.
 ///
 /// @param[in] filename CSV filename.
 /// @param[in] option Parse option.
@@ -638,6 +686,21 @@ bool ParseCSVFromMemory(const char *buffer, const size_t buffer_length,
 template <typename T>
 bool ParseCSVFromFile(const std::string &filename, const ParseOption<T> &option,
                       CSV<T> *csv, std::string *warn, std::string *err);
+
+///
+/// Parse string CSV data from a file.
+///
+/// @param[in] filename CSV filename.
+/// @param[in] option Parse option.
+/// @param[out] csv Parsed CSV data.
+/// @param[out] warn Warning message. Verbose message will be set when
+/// `option.verbose` is set to true.
+/// @param[out] err Error message(filled when return value is false)
+/// @return true upon success. false when error happens during parsing.
+///
+template <typename T>
+bool ParseTextCSVFromFile(const std::string &filename, const ParseTextOption &option,
+                      TextCSV *csv, std::string *warn, std::string *err);
 
 #endif
 
@@ -787,9 +850,234 @@ bool ParseLine(const char *p, const size_t p_len, StackVector<T, 512> *values,
   return false;
 }
 
+static inline bool is_line_ending(const char *p, size_t i, size_t end_i) {
+  if (p[i] == '\0') return true;
+  if (p[i] == '\n') return true;  // this includes \r\n
+  if (p[i] == '\r') {
+    if (((i + 1) < end_i) && (p[i + 1] != '\n')) {  // detect only \r case
+      return true;
+    }
+  }
+  return false;
+}
+
+
+#if 0 // not used a.t.m.
+static bool parse_string(const char *p, const size_t len, char delimiter, std::string &out_token, size_t &out_loc, char quote_char = '"', std::string *err = nullptr)
+{
+  if (len == 0) {
+    if (err) {
+      (*err) += "(parse_string) Input length is zero.\n";
+    }
+    return false;
+  }
+
+  size_t quote_count = 0;
+  size_t s_start = 0; // starting position of a string.
+
+  for (size_t i = 0; i < len; i++) {
+
+    if (is_line_ending(p, i, len - 1)) {
+      if ((quote_count % 2) != 0) {
+        if (err) {
+          (*err) += "(parse_string) The number of quote chars is odd.\n";
+        }
+        return false;
+      }
+      out_token = std::string(p + s_start, i - s_start);
+      out_loc = i;
+      return true;
+    }
+
+    if (p[i] == quote_char) {
+      // 3 or more quote chars are not allowed.
+      if (quote_count > 2) {
+        if (err) {
+          (*err) += "(parse_string) The number of quote chars > 2.\n";
+        }
+        return false;
+      }
+
+      if (quote_count == 0) {
+        s_start = i + 1;
+      }
+      quote_count++;
+      continue;
+    }
+
+    if (((quote_count % 2) == 0) && (p[i] == delimiter)) { // encounter delimiter
+      out_token = std::string(p + s_start, i - s_start);
+      out_loc = i;
+      return true;
+    }
+  }
+
+  if (quote_count % 2 != 0) {
+    if (err) {
+      (*err) += "(parse_string) The number of quote chars is odd.\n";
+    }
+    return false;
+  }
+
+  out_token = std::string(p + s_start, len - s_start);
+  out_loc = len;
+
+  return true;
+}
+#endif
+
+bool ParseLineText(const char *p, const size_t p_len, StackVector<std::string, 512> *values,
+               const ParseTextOption &option, std::string *err) {
+  if ((p == nullptr) || (p_len < 1)) {
+    if (err) {
+      (*err) += "Invalid arg or input is empty.\n";
+    }
+    return false;
+  }
+
+  size_t loc = 0;
+  if (option.delimiter != ' ') {
+    // skip leading space.
+    for (size_t i = loc; i < p_len; i++, loc++) {
+      // TODO(LTE): Consider `\f` and `\v`?
+      bool isspace = (p[i] == ' ') || (p[i] == '\t');
+      if (!isspace) {
+        break;
+      }
+    }
+  }
+
+  // No comment line handling in Text CSV.
+  //if (p[0] == '#') {  // comment line
+  //  return false;
+  //}
+
+  (*values)->clear();
+
+  while (loc < p_len) {
+    if (p[loc] == '\0') {
+      // ???
+      return false;
+    }
+
+    // find delimiter
+    uint32_t quote_char_count = 0;
+    size_t delimiter_loc = loc;
+    for (size_t i = loc; i < p_len; i++, delimiter_loc++) {
+      if ((((quote_char_count % 2) == 0) && p[i] == option.delimiter) || (p[i] == '\0')) {
+        break;
+      }
+      if (p[i] == '"') {
+        if (quote_char_count > 2) {
+          if (err) {
+            (*err) += "Too many quote char(\") in a field.\n";
+          }
+          return false;
+        }
+
+        quote_char_count++;
+      }
+    }
+
+    if (quote_char_count == 1) {
+      // no closing quote. e.g.: "hello\n
+      if (err) {
+        (*err) += "String is not correctly quoted.\n";
+      }
+      return false;
+    }
+
+    if (loc == delimiter_loc) {
+      // null.
+      // something like ",,2.3,,,"
+      loc++;
+
+      if (option.replace_null) {
+        (*values)->push_back(option.null_value);
+      }
+
+      continue;
+    }
+
+    // empty?
+    {
+      bool empty = true;
+      for (size_t i = loc; i < delimiter_loc; i++) {
+        if (!std::isspace(int(p[i]))) {
+          empty = false;
+          break;
+        }
+      }
+
+      if (empty) {
+        if (option.replace_null) {
+          (*values)->push_back(option.null_value);
+        }
+
+        // move to the next of delimiter character.
+        loc = delimiter_loc + 1;
+
+        continue;
+      }
+    }
+
+    {
+      std::string token;
+      if (quote_char_count == 2) {
+        // remove quote char.
+        token = std::string(p + loc + 1, delimiter_loc - loc - 1);
+      } else {
+        token = std::string(p + loc, delimiter_loc - loc);
+      }
+
+      (*values)->push_back(token);
+    }
+
+    // move to the next of delimiter character.
+    loc = delimiter_loc + 1;
+
+    if (option.delimiter != ' ') {
+
+      // skip leading space.
+      for (size_t i = loc; i < p_len; i++, loc++) {
+        bool isspace = (p[i] == ' ') || (p[i] == '\t');
+        if (!isspace) {
+          break;
+        }
+      }
+
+      // delimiter, then spaces and EOF ",  \0" but not ends with delimiter ",\0"
+      if ((loc == p_len) && (delimiter_loc != (p_len-1))) {
+        if (option.replace_null) {
+          (*values)->push_back(option.null_value);
+        }
+      }
+    }
+  }
+
+  if (option.delimiter != ' ') {
+    // last character is the delimtier
+    if (p[p_len-1] == option.delimiter) {
+      if (option.replace_null) {
+        (*values)->push_back(option.null_value);
+      }
+    }
+  }
+
+  if ((*values)->size() > 0) {
+    return true;
+  }
+
+  if (err) {
+    (*err) += "Input is invalid.\n";
+  }
+  return false;
+}
+
 typedef struct {
-  size_t pos;
-  size_t len;
+  size_t pos; // Byte offset in input bytes.
+  size_t len; // The number of bytes
+
 } LineInfo;
 
 // Idea come from https://github.com/antonmks/nvParse
@@ -801,17 +1089,6 @@ typedef struct {
 // Raise # of max threads if you have more CPU cores...
 // In 2019, 64 cores(128 threads) are upper bounds in high-end workstaion PC.
 constexpr int kMaxThreads = 128;
-
-static inline bool is_line_ending(const char *p, size_t i, size_t end_i) {
-  if (p[i] == '\0') return true;
-  if (p[i] == '\n') return true;  // this includes \r\n
-  if (p[i] == '\r') {
-    if (((i + 1) < end_i) && (p[i + 1] != '\n')) {  // detect only \r case
-      return true;
-    }
-  }
-  return false;
-}
 
 // Support quoted string'\"' (do not consider `delimiter` character in quoted string)
 // TODO(LTE): Return error for invalid string input
@@ -1079,7 +1356,6 @@ bool ParseCSVFromMemory(const char *_buffer, const size_t _buffer_length,
             continue;
           }
 
-          // TODO(LTE): parse header string
           bool ret = ParseLine(&buffer[line_infos[t][i].pos],
                                line_infos[t][i].len, &values, option);
 
@@ -1236,6 +1512,371 @@ bool ParseCSVFromMemory(const char *_buffer, const size_t _buffer_length,
   return true;
 }
 
+bool ParseTextCSVFromMemory(const char *_buffer, const size_t _buffer_length,
+                        const ParseTextOption &option, TextCSV *csv,
+                        std::string *warn, std::string *err) {
+  if (_buffer_length < 1) {
+    if (err) {
+      (*err) = "`buffer_length` too short.\n";
+    }
+    return false;
+  }
+
+  const char *buffer{nullptr};
+  size_t buffer_length{0};
+
+  // Skip UTF-8 BOM if exists
+  SkipUTF8BOM(_buffer, _buffer_length, &buffer, &buffer_length);
+
+  csv->values.clear();
+  csv->num_records = 0;
+  csv->num_fields = 0;
+  csv->header.clear();
+
+  auto num_threads = (option.req_num_threads < 0)
+                         ? int(std::thread::hardware_concurrency())
+                         : option.req_num_threads;
+  num_threads =
+      (std::max)(1, (std::min)(static_cast<int>(num_threads), kMaxThreads));
+
+  if (option.verbose) {
+    if (warn) {
+      std::stringstream ss;
+      ss << "# of threads = " << std::to_string(num_threads) << "\n";
+      (*warn) += ss.str();
+    }
+  }
+
+  auto t1 = std::chrono::high_resolution_clock::now();
+
+  StackVector<std::vector<LineInfo>, kMaxThreads> line_infos;
+  line_infos->resize(kMaxThreads);
+
+  for (size_t t = 0; t < static_cast<size_t>(num_threads); t++) {
+    // Pre allocate enough memory. len / 128 / num_threads is just a heuristic
+    // value.
+    line_infos[t].reserve(buffer_length / 128 / size_t(num_threads));
+  }
+
+  std::chrono::duration<double, std::milli> ms_linedetection;
+  std::chrono::duration<double, std::milli> ms_alloc;
+  std::chrono::duration<double, std::milli> ms_parse;
+  std::chrono::duration<double, std::milli> ms_construct;
+
+  // 1. Find '\n' and create line data.
+  {
+    StackVector<std::thread, kMaxThreads> workers;
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+    auto chunk_size = buffer_length / size_t(num_threads);
+
+    // CSV data is too small. use single-threaded parsing
+    if (buffer_length < size_t(num_threads)) {
+      num_threads = 1;
+      chunk_size = buffer_length;
+    }
+
+    for (size_t t = 0; t < static_cast<size_t>(num_threads); t++) {
+      workers->push_back(std::thread([&, t]() {
+        auto start_idx = (t + 0) * chunk_size;
+        auto end_idx = (std::min)((t + 1) * chunk_size, buffer_length - 1);
+        if (t == static_cast<size_t>((num_threads - 1))) {
+          end_idx = buffer_length - 1;
+        }
+
+        // true if the line currently read must be added to the current line
+        // info
+        bool new_line_found =
+            (t == 0) || is_line_ending(buffer, start_idx - 1, end_idx);
+
+        size_t prev_pos = start_idx;
+        for (size_t i = start_idx; i < end_idx; i++) {
+          if (is_line_ending(buffer, i, end_idx)) {
+            if (!new_line_found) {
+              // first linebreak found in (chunk > 0), and a line before this
+              // linebreak belongs to previous chunk, so skip it.
+              prev_pos = i + 1;
+              new_line_found = true;
+            } else {
+              LineInfo info;
+              info.pos = prev_pos;
+              info.len = i - prev_pos;
+
+              if (info.len > 0) {
+                line_infos[t].push_back(info);
+              }
+
+              prev_pos = i + 1;
+            }
+          }
+        }
+
+        // If at least one line started in this chunk, find where it ends in the
+        // rest of the buffer
+        if (new_line_found && (t < size_t(num_threads)) &&
+            (buffer[end_idx - 1] != '\n')) {
+          for (size_t i = end_idx; i < buffer_length; i++) {
+            if (is_line_ending(buffer, i, buffer_length)) {
+              LineInfo info;
+              info.pos = prev_pos;
+              info.len = i - prev_pos;
+
+              if (info.len > 0) {
+                line_infos[t].push_back(info);
+              }
+
+              break;
+            }
+          }
+        }
+      }));
+    }
+
+    for (size_t t = 0; t < workers->size(); t++) {
+      workers[t].join();
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+
+    ms_linedetection = end_time - start_time;
+  }
+
+  auto num_records = 0;
+  for (size_t t = 0; t < size_t(num_threads); t++) {
+    num_records += line_infos[t].size();
+  }
+
+  if (option.verbose && warn) {
+    (*warn) += "# of records = " + std::to_string(num_records) + "\n";
+  }
+
+#if 0
+  // 32 is a heuristic value.
+  if (num_records < (num_threads * 32)) {
+    // Data is too small. Use single thread parsing.
+    (*warn) += "# of records are small. Use single threaded parsing = " + std::to_string(num_records) + "\n";
+    num_threads = 1;
+  }
+#endif
+
+  // 2. allocate per thread buffer
+  auto t_alloc_start = std::chrono::high_resolution_clock::now();
+
+  std::vector<std::vector<std::string>> line_buffer;
+  line_buffer.resize(size_t(num_threads));
+  {
+    for (size_t t = 0; t < size_t(num_threads); t++) {
+      // Heuristics. byte size = # of chars / 4
+      line_buffer[t].reserve(line_infos[t].size() / 4);
+    }
+  }
+
+  ms_alloc = std::chrono::high_resolution_clock::now() - t_alloc_start;
+
+  // Records # of fields per thread.
+  // After finishing parsing, check if these values are all same.
+  std::vector<int> num_fields_per_thread(size_t(num_threads), -1);
+  std::vector<std::string> tls_errs;
+  tls_errs.resize(size_t(num_threads));
+
+  // 3. parse each line in parallel.
+  {
+    StackVector<std::thread, kMaxThreads> workers;
+    auto t_start = std::chrono::high_resolution_clock::now();
+
+    bool invalid_csv = false;
+
+    for (size_t t = 0; t < size_t(num_threads); t++) {
+      workers->push_back(std::thread([&, t]() {
+
+        bool first_line = true;
+        for (size_t i = 0; i < line_infos[t].size(); i++) {
+          StackVector<std::string, 512> values;
+
+          if (line_infos[t][i].len < 1) {
+            // Empty line. skip
+            continue;
+          }
+
+          // Allow empty line before the header
+          bool is_header = (!option.ignore_header) && (t == 0) && first_line;
+
+          first_line = false;
+
+          if (is_header) {
+            // Parse header.
+            csv->header = parse_header(&buffer[line_infos[t][i].pos], line_infos[t][i].len, option.delimiter);
+
+            continue;
+          }
+
+          bool ret = ParseLineText(&buffer[line_infos[t][i].pos],
+                               line_infos[t][i].len, &values, option, &tls_errs[t]);
+
+          if (ret) {
+            if (num_fields_per_thread[t] == -1) {
+              num_fields_per_thread[t] = int(values->size());
+            }
+
+            // All records should have same number of fields.
+            if (num_fields_per_thread[t] != int(values->size())) {
+              invalid_csv = true;
+              break;
+            }
+
+            for (size_t k = 0; k < values->size(); k++) {
+              line_buffer[t].push_back(values[k]);
+            }
+          }
+        }
+      }));
+    }
+
+    for (size_t t = 0; t < workers->size(); t++) {
+      workers[t].join();
+    }
+
+    auto t_end = std::chrono::high_resolution_clock::now();
+
+    ms_parse = t_end - t_start;
+
+    if (invalid_csv) {
+      if (err) {
+        // TODO(LTE): Show the linue number of invalid record.
+        (*err) += "The number of fields must be same for all records.\n";
+      }
+      return false;
+    }
+  }
+
+  {
+    bool has_tls_err = false;
+    for (size_t t = 0; t < tls_errs.size(); t++) {
+      if (tls_errs[t].size()) {
+        if (err) {
+          (*err) += tls_errs[t];
+        }
+        has_tls_err = true;
+      }
+    }
+
+    if (has_tls_err) {
+      return false;
+    }
+  }
+
+
+  // Check if all records have same the number of fields.
+  //for (size_t i = 0; i < num_fields_per_thread.size(); i++) {
+  //  std::cout << "num_fields[" << i << "] = " << num_fields_per_thread[i] << "\n";
+  //}
+
+  if (num_fields_per_thread[0] < 0) {
+    if (csv->header.size()) {
+      // It looks thread 0 only processed header line
+      num_fields_per_thread[0] = int(csv->header.size());
+    }
+  }
+
+  // find the first valid one
+  int num_fields{-1};
+  for (size_t i = 0; i < num_fields_per_thread.size(); i++) {
+    if (num_fields_per_thread[i] > 0) {
+      num_fields = num_fields_per_thread[i];
+      break;
+    }
+  }
+
+  if (num_fields < 0) {
+    if (err) {
+      (*err) += "It looks any thread failed to parse CSV records.\n";
+    }
+    return false;
+  }
+
+  for (size_t i = 0; i < num_fields_per_thread.size(); i++) {
+    if (num_fields_per_thread[i] != -1) {
+      if (num_fields_per_thread[i] != num_fields) {
+        if (err) {
+          std::stringstream ss;
+          ss << "Thread " << i << " has num_fields " << num_fields_per_thread[i]
+             << " but it should be " << num_fields << " (thread 0)\n";
+          (*err) += ss.str();
+        }
+        return false;
+      }
+    }
+  }
+
+  if (!option.ignore_header) {
+    if (csv->header.size() != size_t(num_fields)) {
+      if (err) {
+        std::stringstream ss;
+        ss << "Invalid header string. The number of fields in header: " << csv->header.size() << " must be same with the number of fields " << num_fields << "\n";
+        (*err) += ss.str();
+      }
+      return false;
+    }
+  }
+
+
+  // 4. Construct CSV information.
+  {
+    auto t_start = std::chrono::high_resolution_clock::now();
+
+    csv->num_fields = size_t(num_fields);
+
+    // Offset index to output csv.values.
+    StackVector<size_t, kMaxThreads> offset_table;
+    offset_table->resize(size_t(num_threads));
+
+    // Compute offset index and count actual numer of records.
+    size_t num_actual_records = 0;
+    size_t offset = 0;
+    for (size_t t = 0; t < size_t(num_threads); t++) {
+      offset_table[t] = offset;
+
+      // Assume all record has same number of fields,
+      // so dividing the number of fields gives the number of records.j
+      offset += line_buffer[t].size();  // = num_fields * num_records per thread
+      num_actual_records += line_buffer[t].size() / size_t(num_fields);
+    }
+
+    csv->num_records = num_actual_records;
+
+    csv->values.resize(csv->num_fields * csv->num_records);
+
+    offset = 0;
+    for (size_t t = 0; t < size_t(num_threads); t++) {
+      for (size_t k = 0; k < line_buffer[t].size(); k++) {
+        csv->values[offset + k] = line_buffer[t][k];
+      }
+    }
+
+    auto t_end = std::chrono::high_resolution_clock::now();
+
+    ms_construct = t_end - t_start;
+  }
+
+  auto t4 = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> ms_total = t4 - t1;
+  if (option.verbose) {
+    if (warn) {
+      std::stringstream ss;
+      ss << "total parsing time: " << ms_total.count() << " ms\n";
+      ss << "  line detection : " << ms_linedetection.count() << " ms\n";
+      ss << "  alloc buf      : " << ms_alloc.count() << " ms\n";
+      ss << "  parse          : " << ms_parse.count() << " ms\n";
+      ss << "  construct      : " << ms_construct.count() << " ms\n";
+
+      (*warn) += ss.str();
+    }
+  }
+
+  return true;
+}
+
 #if !defined(NANOCSV_NO_IO)
 template <typename T>
 bool ParseCSVFromFile(const std::string &filename, const ParseOption<T> &option,
@@ -1266,6 +1907,37 @@ bool ParseCSVFromFile(const std::string &filename, const ParseOption<T> &option,
   ifs.read(buffer.data(), static_cast<std::streamsize>(sz));
 
   return ParseCSVFromMemory(buffer.data(), sz, option, csv, warn, err);
+}
+
+bool ParseTextCSVFromFile(const std::string &filename, const ParseTextOption &option,
+                      TextCSV *csv, std::string *warn, std::string *err) {
+
+  std::ifstream ifs(filename);
+  if (!ifs) {
+    if (err) {
+      (*err) =
+          "Failed to open file. File may not be found : " + filename + "\n";
+    }
+    return false;
+  }
+
+  ifs.seekg(0, ifs.end);
+  size_t sz = static_cast<size_t>(ifs.tellg());
+  ifs.seekg(0, ifs.beg);
+
+  if (sz < 1) {
+    if (err) {
+      (*err) = "File size is zero : " + filename + "\n";
+    }
+    return false;
+  }
+
+  std::vector<char> buffer;
+  buffer.resize(sz);
+
+  ifs.read(buffer.data(), static_cast<std::streamsize>(sz));
+
+  return ParseTextCSVFromMemory(buffer.data(), sz, option, csv, warn, err);
 }
 #endif
 
